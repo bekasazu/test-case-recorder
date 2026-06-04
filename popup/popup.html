@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ტესტ-ქეისის ჩამწერი</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <header class="header">
+      <h1>ტესტ-ჩამწერი</h1>
+      <div class="status" id="statusIndicator" title="ჩაწერა არ მიმდინარეობს">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">უმოქმედო</span>
+      </div>
+    </header>
+
+    <p class="step-counter" id="stepCounter">0 ნაბიჯი ჩაწერილია</p>
+
+    <div class="controls">
+      <button type="button" id="btnStart" class="btn btn-start">▶ ჩაწერის დაწყება</button>
+      <button type="button" id="btnStop" class="btn btn-stop" disabled>⏹ ჩაწერის გაჩერება</button>
+    </div>
+
+    <div class="export-row">
+      <label for="exportFormat">ექსპორტი</label>
+      <select id="exportFormat">
+        <option value="text">ექსპორტი — ჩვეულებრივი ტექსტი</option>
+        <option value="json">ექსპორტი — JSON</option>
+        <option value="playwright">ექსპორტი — Playwright (TypeScript)</option>
+        <option value="cypress">ექსპორტი — Cypress</option>
+        <option value="selenium">ექსპორტი — Selenium (Python)</option>
+        <option value="selenium-csharp">ექსპორტი — Selenium (C#)</option>
+      </select>
+      <button type="button" id="btnExport" class="btn btn-export">ჩამოტვირთვა</button>
+    </div>
+
+    <div class="footer-actions">
+      <button type="button" id="btnSaveHistory" class="btn btn-save">💾 ისტორიაში</button>
+      <button type="button" id="btnOpenPanel" class="btn btn-secondary">პანელის გახსნა</button>
+      <button type="button" id="btnClear" class="btn btn-clear">გასუფთავება</button>
+    </div>
+  </div>
+  <script src="../i18n.js"></script>
+  <script src="../export.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ტესტ-ქეისის პანელი</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-left">
+        <h1>ტესტ-ქეისის ჩამწერი</h1>
+        <div class="status" id="statusIndicator">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">უმოქმედო</span>
+        </div>
+      </div>
+      <div class="header-controls">
+        <button type="button" id="btnStart" class="btn btn-start">▶ დაწყება</button>
+        <button type="button" id="btnStop" class="btn btn-stop" disabled>⏹ გაჩერება</button>
+        <button type="button" id="btnClear" class="btn btn-clear">გასუფთავება</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button type="button" class="tab active" data-tab="record" id="tabBtnRecord">ჩაწერა</button>
+      <button type="button" class="tab" data-tab="history" id="tabBtnHistory">ისტორია</button>
+    </nav>
+
+    <div class="tab-content">
+    <!-- Recording tab -->
+    <div class="tab-panel" id="tabRecord">
+      <div class="toolbar">
+        <span class="step-counter" id="stepCounter">0 ნაბიჯი</span>
+        <button type="button" id="btnSaveHistory" class="btn btn-save">💾 ისტორიაში შენახვა</button>
+        <label class="export-label">
+          ექსპორტის ფორმატი
+          <select id="exportFormat">
+            <option value="text">ჩვეულებრივი ტექსტი</option>
+            <option value="json">JSON</option>
+            <option value="playwright">Playwright (TypeScript)</option>
+            <option value="cypress">Cypress</option>
+            <option value="selenium">Selenium (Python)</option>
+            <option value="selenium-csharp">Selenium (C#)</option>
+          </select>
+        </label>
+        <button type="button" id="btnCopyExport" class="btn btn-secondary">ექსპორტის კოპირება</button>
+      </div>
+
+      <main class="main">
+        <section class="steps-section">
+          <h2>ჩაწერილი ნაბიჯები</h2>
+          <ul class="steps-list" id="stepsList"></ul>
+        </section>
+        <section class="preview-section">
+          <h2>ექსპორტის გადახედვა</h2>
+          <pre class="export-preview" id="exportPreview"><code>// ექსპორტის გადახედვა აქ გამოჩნდება</code></pre>
+        </section>
+      </main>
+    </div>
+
+    <!-- History tab -->
+    <div class="tab-panel hidden" id="tabHistory">
+      <div class="history-toolbar">
+        <span class="history-title">ტესტ-ქეისების ისტორია</span>
+        <button type="button" id="btnExportAllHistory" class="btn btn-secondary">ყველას ექსპორტი</button>
+        <button type="button" id="btnImportHistory" class="btn btn-secondary">JSON იმპორტი</button>
+        <input type="file" id="historyFileInput" accept=".json,application/json" hidden>
+      </div>
+
+      <div class="history-layout" id="historyListView">
+        <ul class="history-list" id="historyList"></ul>
+      </div>
+
+      <div class="history-detail hidden" id="historyDetailView">
+        <div class="history-detail-header">
+          <button type="button" id="btnBackHistory" class="btn btn-secondary">← უკან</button>
+          <input type="text" id="historyNameInput" class="history-name-input" placeholder="ტესტ-ქეისის სახელი">
+          <button type="button" id="btnSaveHistoryName" class="btn btn-save">ცვლილებების შენახვა</button>
+          <button type="button" id="btnLoadToRecorder" class="btn btn-start">ჩამწერაში ჩატვირთვა</button>
+        </div>
+        <div class="toolbar history-detail-toolbar">
+          <span class="step-counter" id="historyStepCounter">0 ნაბიჯი</span>
+          <label class="export-label">
+            ექსპორტის ფორმატი
+            <select id="historyExportFormat">
+              <option value="text">ჩვეულებრივი ტექსტი</option>
+              <option value="json">JSON</option>
+              <option value="playwright">Playwright (TypeScript)</option>
+              <option value="cypress">Cypress</option>
+              <option value="selenium">Selenium (Python)</option>
+              <option value="selenium-csharp">Selenium (C#)</option>
+            </select>
+          </label>
+          <button type="button" id="btnCopyHistoryExport" class="btn btn-secondary">ექსპორტის კოპირება</button>
+        </div>
+        <main class="main">
+          <section class="steps-section">
+            <h2 id="historyStepsTitle">ნაბიჯები</h2>
+            <ul class="steps-list" id="historyStepsList"></ul>
+          </section>
+          <section class="preview-section">
+            <h2>ექსპორტის გადახედვა</h2>
+            <pre class="export-preview" id="historyExportPreview"><code></code></pre>
+          </section>
+        </main>
+      </div>
+    </div>
+    </div><!-- .tab-content -->
+  </div>
+  <script src="../i18n.js"></script>
+  <script src="../export.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>
