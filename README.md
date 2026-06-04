@@ -184,4 +184,4 @@ test('Generated Test Case', async ({ page }) => {
 
 ## 👤 ავტორი
 
-გენერირებულია Cursor AI-სთვის · QA ავტომატიზაციის ტესტ-ქეისების სწრაფი შექმნისთვის.
+Beka Sazuashvili
