@@ -9,6 +9,7 @@ const btnStop = document.getElementById('btnStop');
 const btnClear = document.getElementById('btnClear');
 const btnCopyExport = document.getElementById('btnCopyExport');
 const btnSaveHistory = document.getElementById('btnSaveHistory');
+const btnExport = document.getElementById('btnExport');
 
 const tabBtnRecord = document.getElementById('tabBtnRecord');
 const tabBtnHistory = document.getElementById('tabBtnHistory');
@@ -30,6 +31,7 @@ const btnCopyHistoryExport = document.getElementById('btnCopyHistoryExport');
 const btnExportAllHistory = document.getElementById('btnExportAllHistory');
 const btnImportHistory = document.getElementById('btnImportHistory');
 const historyFileInput = document.getElementById('historyFileInput');
+const exportAllFormat = document.getElementById('exportAllFormat');
 
 let currentSteps = [];
 let historySteps = [];
@@ -504,6 +506,31 @@ btnCopyExport.addEventListener('click', async () => {
   setTimeout(() => { btnCopyExport.textContent = I18N.btnCopyExport; }, 1500);
 });
 
+btnExport?.addEventListener('click', async () => {
+  const format = exportFormat.value;
+  const res = await sendMessage('EXPORT_STEPS', { format });
+  if (!res?.content) return;
+
+  const extensions = {
+    text: 'txt',
+    json: 'json',
+    playwright: 'spec.ts',
+    cypress: 'cy.js',
+    selenium: 'py',
+    'selenium-csharp': 'cs'
+  };
+
+  const blob = new Blob([res.content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const ext = extensions[format] || 'txt';
+  const filename = `test-case-${Date.now()}.${ext}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
 btnBackHistory.addEventListener('click', () => {
   closeHistoryDetail();
   renderHistoryList();
@@ -537,9 +564,55 @@ btnCopyHistoryExport.addEventListener('click', async () => {
   setTimeout(() => { btnCopyHistoryExport.textContent = I18N.btnCopyExport; }, 1500);
 });
 
+function sanitizeFilename(name) {
+  return String(name || 'test-case').replace(/[^a-z0-9-_\.\s]/gi, '_').slice(0, 120);
+}
+
 btnExportAllHistory.addEventListener('click', async () => {
-  const res = await sendMessage('EXPORT_HISTORY');
-  if (res?.history) downloadJson(res.history, `test-case-history-${Date.now()}.json`);
+  const fmt = (exportAllFormat?.value) || 'json';
+  try {
+    btnExportAllHistory.disabled = true;
+    const res = await sendMessage('EXPORT_HISTORY');
+    if (!res?.history || !res.history.length) return alert(I18N.historyEmpty);
+
+    if (fmt === 'json') {
+      downloadJson(res.history, `test-case-history-${Date.now()}.json`);
+      return;
+    }
+
+    const extensions = {
+      text: 'txt',
+      json: 'json',
+      playwright: 'spec.ts',
+      cypress: 'cy.js',
+      selenium: 'py',
+      'selenium-csharp': 'cs'
+    };
+
+    // For non-json formats, export each history entry as its own file
+    for (const entry of res.history) {
+      try {
+        const content = exportSteps(entry.steps || [], fmt);
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const ext = extensions[fmt] || 'txt';
+        const name = sanitizeFilename(entry.name) || `test-case-${entry.id || Date.now()}`;
+        const filename = `${name}.${ext}`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (e) {
+        console.error('Export entry failed', e);
+      }
+    }
+  } catch (err) {
+    console.error('Export all failed', err);
+    alert(I18N.exportFailed || 'Export failed');
+  } finally {
+    btnExportAllHistory.disabled = false;
+  }
 });
 
 btnImportHistory.addEventListener('click', () => historyFileInput.click());

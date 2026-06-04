@@ -20,6 +20,7 @@
         <button type="button" id="btnStart" class="btn btn-start">▶ დაწყება</button>
         <button type="button" id="btnStop" class="btn btn-stop" disabled>⏹ გაჩერება</button>
         <button type="button" id="btnClear" class="btn btn-clear">გასუფთავება</button>
+        <button type="button" id="btnExport" class="btn btn-secondary">ექსპორტი</button>
       </div>
     </header>
 
@@ -64,6 +65,17 @@
     <div class="tab-panel hidden" id="tabHistory">
       <div class="history-toolbar">
         <span class="history-title">ტესტ-ქეისების ისტორია</span>
+        <label class="export-label export-all-label">
+          ფორმატი
+          <select id="exportAllFormat">
+            <option value="text">ჩვეულებრივი ტექსტი</option>
+            <option value="json">JSON</option>
+            <option value="playwright">Playwright (TypeScript)</option>
+            <option value="cypress">Cypress</option>
+            <option value="selenium">Selenium (Python)</option>
+            <option value="selenium-csharp">Selenium (C#)</option>
+          </select>
+        </label>
         <button type="button" id="btnExportAllHistory" class="btn btn-secondary">ყველას ექსპორტი</button>
         <button type="button" id="btnImportHistory" class="btn btn-secondary">JSON იმპორტი</button>
         <input type="file" id="historyFileInput" accept=".json,application/json" hidden>
