@@ -122,6 +122,18 @@ var I18N = {
   viewingHistory: 'ისტორიის ნახვა',
   promptSaveOnStop: 'შევინახოთ ეს ჩაწერა ისტორიაში?',
 
+  // Network Activity Labels
+  networkCount: (n) => `${n} მოთხოვნა`,
+  emptyNetworkActivity: 'ქსელის აქტივობა ჯერ არ ფიქსირდება',
+  networkExport: 'ქსელის მოთხოვნების ექსპორტი',
+  networkMethod: 'მეთოდი',
+  networkEndpoint: 'ენდპოინტი',
+  networkStatus: 'სტატუსი',
+  networkDuration: 'დრო',
+  networkHeaders: 'თავსართები',
+  networkBody: 'სხეული',
+  networkFilter: 'ფილტრი',
+
   actionLabel(action) {
     const map = {
       Click: this.actionClick,

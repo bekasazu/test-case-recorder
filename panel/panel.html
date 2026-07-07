@@ -26,6 +26,7 @@
 
     <nav class="tabs">
       <button type="button" class="tab active" data-tab="record" id="tabBtnRecord">ჩაწერა</button>
+      <button type="button" class="tab" data-tab="network" id="tabBtnNetwork">🌐 ქსელი</button>
       <button type="button" class="tab" data-tab="history" id="tabBtnHistory">ისტორია</button>
     </nav>
 
@@ -57,6 +58,42 @@
         <section class="preview-section">
           <h2>ექსპორტის გადახედვა</h2>
           <pre class="export-preview" id="exportPreview"><code>// ექსპორტის გადახედვა აქ გამოჩნდება</code></pre>
+        </section>
+      </main>
+    </div>
+
+    <!-- Network Activity tab -->
+    <div class="tab-panel hidden" id="tabNetwork">
+      <div class="network-toolbar">
+        <span class="network-counter" id="networkCounter">0 მოთხოვნა</span>
+        <input type="text" id="networkSearch" class="network-search" placeholder="ძებნა...">
+        <label class="network-filter-label">
+          მეთოდი
+          <select id="networkMethodFilter">
+            <option value="">ყველა</option>
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="PATCH">PATCH</option>
+            <option value="DELETE">DELETE</option>
+            <option value="HEAD">HEAD</option>
+          </select>
+        </label>
+        <label class="export-label">
+          ექსპორტის ფორმატი
+          <select id="networkExportFormat">
+            <option value="postman">Postman Collection</option>
+            <option value="har">HAR ფაილი</option>
+          </select>
+        </label>
+        <button type="button" id="btnExportNetwork" class="btn btn-secondary">ექსპორტი</button>
+        <button type="button" id="btnClearNetwork" class="btn btn-clear">გასუფთავება</button>
+      </div>
+
+      <main class="main">
+        <section class="network-section">
+          <h2>ქსელის აქტივობა</h2>
+          <ul class="network-list" id="networkList"></ul>
         </section>
       </main>
     </div>

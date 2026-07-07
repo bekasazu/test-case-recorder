@@ -12,9 +12,19 @@ const btnSaveHistory = document.getElementById('btnSaveHistory');
 const btnExport = document.getElementById('btnExport');
 
 const tabBtnRecord = document.getElementById('tabBtnRecord');
+const tabBtnNetwork = document.getElementById('tabBtnNetwork');
 const tabBtnHistory = document.getElementById('tabBtnHistory');
 const tabRecord = document.getElementById('tabRecord');
+const tabNetwork = document.getElementById('tabNetwork');
 const tabHistory = document.getElementById('tabHistory');
+
+const networkCounter = document.getElementById('networkCounter');
+const networkList = document.getElementById('networkList');
+const networkSearch = document.getElementById('networkSearch');
+const networkMethodFilter = document.getElementById('networkMethodFilter');
+const networkExportFormat = document.getElementById('networkExportFormat');
+const btnExportNetwork = document.getElementById('btnExportNetwork');
+const btnClearNetwork = document.getElementById('btnClearNetwork');
 
 const historyList = document.getElementById('historyList');
 const historyListView = document.getElementById('historyListView');
@@ -34,6 +44,7 @@ const historyFileInput = document.getElementById('historyFileInput');
 const exportAllFormat = document.getElementById('exportAllFormat');
 
 let currentSteps = [];
+let currentApiRequests = [];
 let historySteps = [];
 let activeHistoryId = null;
 let draggedIndex = null;
@@ -341,6 +352,8 @@ async function refresh() {
   try {
     const res = await sendMessage('GET_STATUS');
     if (res) {
+      const apiRes = await sendMessage('GET_API_REQUESTS');
+      currentApiRequests = apiRes?.apiRequests || [];
       updateUI({ isRecording: res.isRecording, steps: res.steps || [] });
     } else {
       updateUI({ isRecording: false, steps: [] });
@@ -430,6 +443,89 @@ async function openHistoryDetail(id) {
   updateHistoryPreview(historySteps);
 }
 
+// Network Activity Functions
+
+async function refreshNetworkRequests() {
+  const res = await sendMessage('GET_API_REQUESTS');
+  if (res?.apiRequests) {
+    currentApiRequests = res.apiRequests;
+    renderNetworkRequests(currentApiRequests);
+  }
+}
+
+function renderNetworkRequests(requests) {
+  networkList.innerHTML = '';
+  
+  if (!requests.length) {
+    const li = document.createElement('li');
+    li.className = 'empty-state';
+    li.textContent = I18N.emptyNetworkActivity || 'No network requests captured';
+    networkList.appendChild(li);
+    networkCounter.textContent = I18N.networkCount ? I18N.networkCount(0) : '0 requests';
+    return;
+  }
+
+  // Filter requests
+  const searchTerm = (networkSearch?.value || '').toLowerCase();
+  const methodFilter = networkMethodFilter?.value || '';
+  
+  const filtered = requests.filter(req => {
+    const matchesSearch = !searchTerm || req.url.toLowerCase().includes(searchTerm) || 
+                         req.method.toLowerCase().includes(searchTerm) ||
+                         req.domain.toLowerCase().includes(searchTerm);
+    const matchesMethod = !methodFilter || req.method === methodFilter;
+    return matchesSearch && matchesMethod;
+  });
+
+  networkCounter.textContent = `${filtered.length}/${requests.length} მოთხოვნა`;
+
+  filtered.forEach((req) => {
+    const li = document.createElement('li');
+    li.className = 'network-item';
+    
+    const statusClass = req.status >= 400 ? 'status-error' : (req.status >= 300 ? 'status-redirect' : 'status-ok');
+    const endpoint = req.endpoint || req.url.split('/').pop() || '/';
+    
+    li.innerHTML = `
+      <div class="network-item-header">
+        <div class="network-item-meta">
+          <span class="network-method">${req.method}</span>
+          <span class="network-endpoint">${escapeHtml(endpoint.slice(0, 50))}</span>
+          <span class="network-status ${statusClass}">${req.status || '⏳'}</span>
+          <span class="network-duration">⏱ ${req.duration || 0}ms</span>
+        </div>
+        <button class="btn btn-sm btn-secondary network-toggle-details" type="button">▾</button>
+      </div>
+      <div class="network-item-body">
+        <div class="network-url">${escapeHtml(req.url)}</div>
+        <div class="network-domain">Domain: ${escapeHtml(req.domain)}</div>
+      </div>
+      <div class="network-item-details hidden">
+        <div class="network-details-section">
+          <h4>Request Headers</h4>
+          <pre>${escapeHtml(JSON.stringify(req.headers, null, 2))}</pre>
+        </div>
+        ${req.requestBodyRaw ? `
+          <div class="network-details-section">
+            <h4>Request Body</h4>
+            <pre>${escapeHtml(req.requestBodyRaw)}</pre>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    const toggleBtn = li.querySelector('.network-toggle-details');
+    const details = li.querySelector('.network-item-details');
+    
+    toggleBtn.addEventListener('click', () => {
+      details.classList.toggle('hidden');
+      toggleBtn.textContent = details.classList.contains('hidden') ? '▾' : '▴';
+    });
+
+    networkList.appendChild(li);
+  });
+}
+
 function closeHistoryDetail() {
   activeHistoryId = null;
   historySteps = [];
@@ -439,11 +535,20 @@ function closeHistoryDetail() {
 
 function switchTab(tab) {
   const isRecord = tab === 'record';
+  const isNetwork = tab === 'network';
+  const isHistory = tab === 'history';
+  
   tabBtnRecord.classList.toggle('active', isRecord);
-  tabBtnHistory.classList.toggle('active', !isRecord);
+  tabBtnNetwork.classList.toggle('active', isNetwork);
+  tabBtnHistory.classList.toggle('active', isHistory);
+  
   tabRecord.classList.toggle('hidden', !isRecord);
-  tabHistory.classList.toggle('hidden', isRecord);
-  if (!isRecord) {
+  tabNetwork.classList.toggle('hidden', !isNetwork);
+  tabHistory.classList.toggle('hidden', !isHistory);
+  
+  if (isNetwork) {
+    refreshNetworkRequests();
+  } else if (isHistory) {
     closeHistoryDetail();
     renderHistoryList();
   }
@@ -460,6 +565,7 @@ function downloadJson(data, filename) {
 }
 
 tabBtnRecord.addEventListener('click', () => switchTab('record'));
+tabBtnNetwork.addEventListener('click', () => switchTab('network'));
 tabBtnHistory.addEventListener('click', () => switchTab('history'));
 
 btnStart.addEventListener('click', async () => {
@@ -616,6 +722,47 @@ btnExportAllHistory.addEventListener('click', async () => {
 });
 
 btnImportHistory.addEventListener('click', () => historyFileInput.click());
+
+// Network Activity Event Listeners
+
+networkSearch?.addEventListener('input', () => renderNetworkRequests(currentApiRequests));
+networkMethodFilter?.addEventListener('change', () => renderNetworkRequests(currentApiRequests));
+
+btnExportNetwork?.addEventListener('click', async () => {
+  const format = networkExportFormat?.value || 'postman';
+  const res = await sendMessage('EXPORT_API_REQUESTS', {
+    format,
+    testCaseName: 'Recorded API Requests',
+    groupBy: 'domain',
+    includeResponses: false
+  });
+  
+  if (!res?.content) return alert('No requests to export');
+
+  const extensions = {
+    postman: 'json',
+    har: 'json'
+  };
+
+  const blob = new Blob([res.content], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const ext = extensions[format] || 'json';
+  const filename = `api-requests-${Date.now()}.${ext}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
+btnClearNetwork?.addEventListener('click', async () => {
+  if (!confirm('Delete all captured API requests?')) return;
+  const res = await sendMessage('CLEAR_API_REQUESTS');
+  if (res?.ok) {
+    currentApiRequests = [];
+    renderNetworkRequests([]);
+  }
+});
 
 historyFileInput.addEventListener('change', async (e) => {
   const file = e.target.files?.[0];

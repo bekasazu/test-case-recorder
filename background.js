@@ -1,7 +1,8 @@
-importScripts('i18n.js', 'export.js');
+importScripts('i18n.js', 'export.js', 'postman-generator.js');
 
 const STORAGE_KEYS = {
   STEPS: 'recordedSteps',
+  API_REQUESTS: 'apiRequests',
   RECORDING: 'isRecording',
   HISTORY: 'testCaseHistory'
 };
@@ -21,7 +22,8 @@ async function saveHistory(history) {
 
 async function saveToHistory(name, stepsOverride) {
   const steps = stepsOverride || (await getSteps());
-  if (!steps.length) return { ok: false, reason: 'no_steps' };
+  const apiRequests = await getApiRequests();
+  if (!steps.length && !apiRequests.length) return { ok: false, reason: 'no_steps' };
 
   const history = await getHistory();
   const now = new Date().toISOString();
@@ -32,7 +34,8 @@ async function saveToHistory(name, stepsOverride) {
     updatedAt: now,
     startUrl: steps[0]?.pageUrl || null,
     stepCount: steps.length,
-    steps: renumberSteps(JSON.parse(JSON.stringify(steps)))
+    steps: renumberSteps(JSON.parse(JSON.stringify(steps))),
+    apiRequests: JSON.parse(JSON.stringify(apiRequests))
   };
 
   history.unshift(entry);
@@ -103,6 +106,50 @@ async function replaceSteps(steps) {
   return { ok: true, steps: normalized };
 }
 
+// API Request Management Functions
+
+async function getApiRequests() {
+  const result = await getStorage([STORAGE_KEYS.API_REQUESTS]);
+  return result[STORAGE_KEYS.API_REQUESTS] || [];
+}
+
+async function saveApiRequests(apiRequests) {
+  await setStorage({ [STORAGE_KEYS.API_REQUESTS]: apiRequests });
+}
+
+async function addApiRequest(apiRequest) {
+  const { [STORAGE_KEYS.RECORDING]: isRecording } = await getStorage([STORAGE_KEYS.RECORDING]);
+  if (!isRecording) return { ok: false, reason: 'not_recording' };
+
+  const requests = await getApiRequests();
+  requests.push(apiRequest);
+  await saveApiRequests(requests);
+  return { ok: true, requests };
+}
+
+async function clearApiRequests() {
+  await saveApiRequests([]);
+  return { ok: true, requests: [] };
+}
+
+async function deleteApiRequest(requestId) {
+  let requests = await getApiRequests();
+  requests = requests.filter((r) => r.requestId !== requestId);
+  await saveApiRequests(requests);
+  return { ok: true, requests };
+}
+
+async function updateApiRequest(requestId, updates) {
+  const requests = await getApiRequests();
+  const idx = requests.findIndex((r) => r.requestId === requestId);
+  if (idx === -1) return { ok: false, reason: 'not_found' };
+
+  const request = { ...requests[idx], ...updates };
+  requests[idx] = request;
+  await saveApiRequests(requests);
+  return { ok: true, requests };
+}
+
 async function importHistory(entries) {
   if (!Array.isArray(entries)) return { ok: false, reason: 'invalid_format' };
   const history = await getHistory();
@@ -113,7 +160,8 @@ async function importHistory(entries) {
     updatedAt: e.updatedAt || new Date().toISOString(),
     startUrl: e.startUrl || e.steps?.[0]?.pageUrl || null,
     stepCount: (e.steps || []).length,
-    steps: renumberSteps(e.steps || [])
+    steps: renumberSteps(e.steps || []),
+    apiRequests: e.apiRequests || []
   }));
   const merged = [...imported, ...history];
   await saveHistory(merged);
@@ -147,7 +195,8 @@ function renumberSteps(steps) {
 async function startRecording(senderTabId) {
   await setStorage({
     [STORAGE_KEYS.RECORDING]: true,
-    [STORAGE_KEYS.STEPS]: []
+    [STORAGE_KEYS.STEPS]: [],
+    [STORAGE_KEYS.API_REQUESTS]: []
   });
 
   const tabs = await chrome.tabs.query({});
@@ -367,13 +416,64 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: true, content, format, totalSteps: steps.length });
           break;
         }
+        case 'ADD_API_REQUEST': {
+          const result = await addApiRequest(message.apiRequest);
+          sendResponse(result);
+          break;
+        }
+        case 'GET_API_REQUESTS': {
+          const apiRequests = await getApiRequests();
+          sendResponse({ ok: true, apiRequests });
+          break;
+        }
+        case 'DELETE_API_REQUEST': {
+          const result = await deleteApiRequest(message.requestId);
+          sendResponse(result);
+          break;
+        }
+        case 'CLEAR_API_REQUESTS': {
+          const result = await clearApiRequests();
+          sendResponse(result);
+          break;
+        }
+        case 'UPDATE_API_REQUEST': {
+          const result = await updateApiRequest(message.requestId, message.updates);
+          sendResponse(result);
+          break;
+        }
+        case 'EXPORT_API_REQUESTS': {
+          const apiRequests = await getApiRequests();
+          const steps = await getSteps();
+          const format = message.format || 'postman';
+          let content = '';
+          if (format === 'postman') {
+            const collection = generatePostmanCollection(apiRequests, {
+              testCaseName: message.testCaseName || 'Recorded Test Case',
+              testCaseDescription: message.testCaseDescription || '',
+              groupBy: message.groupBy || 'domain',
+              includeResponses: message.includeResponses || false
+            });
+            content = JSON.stringify(collection, null, 2);
+          } else if (format === 'har') {
+            const har = generateHAR(apiRequests, {
+              testCaseName: message.testCaseName || 'Recorded Session',
+              pageUrl: steps[0]?.pageUrl || ''
+            });
+            content = JSON.stringify(har, null, 2);
+          }
+          sendResponse({ ok: true, content, format, totalRequests: apiRequests.length });
+          break;
+        }
         case 'GET_STATUS': {
           const steps = await getSteps();
+          const apiRequests = await getApiRequests();
           const { [STORAGE_KEYS.RECORDING]: isRecording } = await getStorage([STORAGE_KEYS.RECORDING]);
           sendResponse({
             isRecording: !!isRecording,
             stepCount: steps.length,
-            steps
+            apiRequestCount: apiRequests.length,
+            steps,
+            apiRequests
           });
           break;
         }
