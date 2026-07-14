@@ -187,68 +187,9 @@
         return originalFetch.apply(this, args);
       }
 
-      const [resource, config = {}] = args;
-
-      const url = typeof resource === 'string'
-        ? resource
-        : resource.url;
-
-      const method = config.method || 'GET';
-      const headers = new Headers(config.headers || {});
-
-      const contentType = headers.get('content-type') || '';
-
-      let requestBody = null;
-      let requestBodyRaw = '';
-
-      if (
-        config.body &&
-        method !== 'GET' &&
-        method !== 'HEAD'
-      ) {
-        try {
-
-          if (typeof config.body === 'string') {
-
-            requestBodyRaw = config.body;
-
-          } else if (config.body instanceof URLSearchParams) {
-
-            requestBodyRaw = config.body.toString();
-
-          } else if (config.body instanceof FormData) {
-
-            requestBodyRaw = JSON.stringify(
-              Object.fromEntries(config.body.entries())
-            );
-
-          } else if (config.body instanceof Blob) {
-
-            requestBodyRaw = '[Blob body]';
-
-          } else {
-
-            requestBodyRaw = String(config.body);
-
-          }
-
-
-          requestBody = parseBody(
-            requestBodyRaw,
-            contentType,
-            API_FILTER_CONFIG.maxRequestBodySize
-          );
-
-        } catch(e) {
-          console.warn(
-            '[Interceptor] Body parse error',
-            e
-          );
-        }
-      }
-      const url = typeof resource === 'string'
-        ? resource
-        : resource.url;
+      const [resource, config] = args;
+      const request = new Request(resource, config);
+      const url = request.url;
       const domain = extractDomain(url);
       
       if (!shouldCaptureDomain(domain)) {
@@ -258,7 +199,7 @@
       const requestId = generateRequestId();
       const startTime = Date.now();
       
-      //const method = request.method || 'GET';
+      const method = request.method || 'GET';
       if (!API_FILTER_CONFIG.captureMethods.includes(method)) {
         return originalFetch.apply(this, args);
       }
