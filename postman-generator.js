@@ -79,9 +79,101 @@ function groupByDomain(apiRequests) {
 }
 
 /**
+ * ---------- Auth/token detection for auto-generated Postman test scripts ----------
+ * Heuristically finds a login/token-issuing request in the captured session and
+ * attaches a `pm.test(...)` post-response script that stores the token as a
+ * collection variable, plus rewrites matching Authorization headers on other
+ * requests to reference that variable — so the exported collection can be run
+ * end-to-end without manually copy-pasting a token.
+ */
+
+const TOKEN_FIELD_CANDIDATES = [
+  'accessToken', 'access_token', 'token', 'authToken', 'auth_token',
+  'jwt', 'idToken', 'id_token', 'sessionToken', 'session_token',
+  'bearerToken', 'bearer_token', 'apiToken', 'api_token'
+];
+
+const AUTH_URL_PATTERN = /\b(login|signin|sign-in|auth|authenticate|authorize|token|accesstoken)\b/i;
+
+/**
+ * Look for a token-shaped field in a parsed JSON response body.
+ * Checks top level first, then one level of nesting (e.g. { data: { accessToken } }).
+ * Returns a dot-path string usable in `responseBody.<path>`, or null.
+ */
+function findTokenField(responseBody) {
+  if (!responseBody || typeof responseBody !== 'object' || Array.isArray(responseBody)) return null;
+
+  for (const key of TOKEN_FIELD_CANDIDATES) {
+    if (typeof responseBody[key] === 'string' && responseBody[key].length > 0) {
+      return { path: key, value: responseBody[key] };
+    }
+  }
+  for (const outerKey of Object.keys(responseBody)) {
+    const val = responseBody[outerKey];
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      for (const key of TOKEN_FIELD_CANDIDATES) {
+        if (typeof val[key] === 'string' && val[key].length > 0) {
+          return { path: `${outerKey}.${key}`, value: val[key] };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function looksLikeAuthRequest(apiRequest) {
+  if (!apiRequest) return false;
+  const methodOk = ['POST', 'PUT'].includes((apiRequest.method || '').toUpperCase());
+  const urlMatch = AUTH_URL_PATTERN.test(apiRequest.endpoint || apiRequest.url || '');
+  return methodOk || urlMatch;
+}
+
+/**
+ * Scan all captured requests and decide which ones (if any) should get an
+ * auto-generated token-capture test script. Returns a map of
+ * requestId -> { path, value, variableName }.
+ */
+function detectAuthTokenRequests(apiRequests, variableName) {
+  const map = {};
+  for (const req of apiRequests) {
+    const parsedBody = typeof req.responseBody === 'object' ? req.responseBody : null;
+    const found = findTokenField(parsedBody);
+    if (found && looksLikeAuthRequest(req)) {
+      map[req.requestId] = { ...found, variableName };
+    }
+  }
+  return map;
+}
+
+function buildTokenTestScriptExec(fieldPath, variableName) {
+  return [
+    'var responseBody = pm.response.json();',
+    '',
+    'pm.test("get access token", function () {',
+    `    pm.collectionVariables.set('${variableName}', responseBody.${fieldPath});`,
+    '});'
+  ];
+}
+
+/**
+ * Given the raw token VALUE captured from the auth response, rewrite any
+ * Authorization/x-api-key style header on OTHER requests that carries that
+ * exact literal value so it references {{variableName}} instead.
+ */
+function chainTokenIntoHeaders(headersArray, tokenValue, variableName) {
+  if (!tokenValue) return headersArray;
+  return headersArray.map((h) => {
+    if (typeof h.value === 'string' && h.value.includes(tokenValue)) {
+      return { ...h, value: h.value.split(tokenValue).join(`{{${variableName}}}`) };
+    }
+    return h;
+  });
+}
+
+/**
  * Create a Postman request item from API request
  */
-function createPostmanItem(apiRequest) {
+function createPostmanItem(apiRequest, tokenInfoByRequestId = {}, appliedTokenVars = new Set()) {
   const urlParsed = parseUrlForPostman(apiRequest.url);
   
   // Build request body
@@ -101,7 +193,7 @@ function createPostmanItem(apiRequest) {
   }
 
   // Build headers array
-  const headers = [];
+  let headers = [];
   if (apiRequest.headers && typeof apiRequest.headers === 'object') {
     for (const [key, val] of Object.entries(apiRequest.headers)) {
       headers.push({
@@ -118,6 +210,16 @@ function createPostmanItem(apiRequest) {
       value: apiRequest.requestContentType,
       disabled: false
     });
+  }
+
+  const tokenInfo = tokenInfoByRequestId[apiRequest.requestId];
+
+  // On every request OTHER than the one that issued the token, replace any
+  // header carrying the literal token value with a {{variable}} reference.
+  for (const info of Object.values(tokenInfoByRequestId)) {
+    if (info && info.value) {
+      headers = chainTokenIntoHeaders(headers, info.value, info.variableName);
+    }
   }
 
   // Build item
@@ -154,6 +256,17 @@ function createPostmanItem(apiRequest) {
       cookie: [],
       body: responseStr
     }];
+  }
+
+  if (tokenInfo) {
+    item.event = [{
+      listen: 'test',
+      script: {
+        type: 'text/javascript',
+        exec: buildTokenTestScriptExec(tokenInfo.path, tokenInfo.variableName)
+      }
+    }];
+    appliedTokenVars.add(tokenInfo.variableName);
   }
 
   return item;

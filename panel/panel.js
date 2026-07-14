@@ -511,6 +511,18 @@ function renderNetworkRequests(requests) {
             <pre>${escapeHtml(req.requestBodyRaw)}</pre>
           </div>
         ` : ''}
+        <div class="network-details-section">
+          <h4>Response Headers</h4>
+          <pre>${escapeHtml(JSON.stringify(req.responseHeaders || {}, null, 2))}</pre>
+        </div>
+        <div class="network-details-section">
+          <h4>Response Body</h4>
+          <pre>${req.responseBodyRaw
+            ? escapeHtml(typeof req.responseBody === 'object'
+                ? JSON.stringify(req.responseBody, null, 2)
+                : req.responseBodyRaw)
+            : '<span class="empty-hint">— პასუხის სხეული არ დაფიქსირდა —</span>'}</pre>
+        </div>
       </div>
     `;
 
@@ -734,7 +746,7 @@ btnExportNetwork?.addEventListener('click', async () => {
     format,
     testCaseName: 'Recorded API Requests',
     groupBy: 'domain',
-    includeResponses: false
+    includeResponses: true
   });
   
   if (!res?.content) return alert('No requests to export');

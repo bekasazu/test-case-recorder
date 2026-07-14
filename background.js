@@ -128,7 +128,10 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
       domain,
       endpoint: request.url.replace(/^https?:\/\/[^/]+/, ''),
       status: null,
-      headers: maskSensitiveHeaders(request.headers || {}),
+      // NOTE: header masking intentionally disabled — internal-only tool,
+      // real auth tokens/cookies are needed in the panel and in the
+      // exported Postman collection so requests actually work when replayed.
+      headers: request.headers || {},
       requestBody,
       requestBodyRaw,
       requestContentType: contentType,
@@ -663,7 +666,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               testCaseName: message.testCaseName || 'Recorded Test Case',
               testCaseDescription: message.testCaseDescription || '',
               groupBy: message.groupBy || 'domain',
-              includeResponses: message.includeResponses || false
+              includeResponses: message.includeResponses !== undefined ? message.includeResponses : true
             });
             content = JSON.stringify(collection, null, 2);
           } else if (format === 'har') {
