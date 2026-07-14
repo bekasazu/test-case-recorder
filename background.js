@@ -477,6 +477,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
           break;
         }
+        case 'ADD_API_REQUEST': {
+          console.log('[BACKGROUND] API REQUEST', message.apiRequest);
+      
+          const result = await addApiRequest(message.apiRequest);
+      
+          console.log('[BACKGROUND] STORED', result);
+      
+          sendResponse(result);
+          break;
+      }
         default:
           sendResponse({ ok: false, error: 'unknown_message' });
       }
@@ -486,6 +496,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   })();
   return true;
 });
+
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});

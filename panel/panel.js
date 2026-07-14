@@ -787,6 +787,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.recordedSteps || changes.isRecording) {
     refresh();
   }
+  if (changes.apiRequests && tabNetwork && !tabNetwork.classList.contains('hidden')) {
+    refreshNetworkRequests();
+  }
   if (changes.testCaseHistory && tabHistory && !tabHistory.classList.contains('hidden')) {
     if (historyListView && !historyListView.classList.contains('hidden')) {
       renderHistoryList();
