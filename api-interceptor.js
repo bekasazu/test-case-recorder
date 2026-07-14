@@ -182,56 +182,84 @@
     const originalFetch = window.fetch;
     
     window.fetch = function (...args) {
-      console.log("FETCH INTERCEPTED", args);
       if (!isRecording) {
         return originalFetch.apply(this, args);
       }
 
       const [resource, config] = args;
-      const request = new Request(resource, config);
-      const url = request.url;
+
+      // IMPORTANT: never do `new Request(resource, config)` here just to
+      // inspect it. If `resource` is already a Request instance (common with
+      // GraphQL clients, retry/interceptor libraries, some SDKs), wrapping it
+      // in a new Request disturbs/locks the ORIGINAL Request's body stream.
+      // Since we still forward the original `args` to the real fetch below,
+      // that call would then throw synchronously ("body stream already
+      // read") and no real network request would ever go out. So we read
+      // url/method/headers directly, without constructing a new Request.
+      const isResourceRequest = typeof Request !== 'undefined' && resource instanceof Request;
+      const url = isResourceRequest ? resource.url : String(resource);
       const domain = extractDomain(url);
-      
+
       if (!shouldCaptureDomain(domain)) {
         return originalFetch.apply(this, args);
       }
 
       const requestId = generateRequestId();
       const startTime = Date.now();
-      
-      const method = request.method || 'GET';
+
+      const method = (config && config.method) || (isResourceRequest && resource.method) || 'GET';
       if (!API_FILTER_CONFIG.captureMethods.includes(method)) {
         return originalFetch.apply(this, args);
       }
 
-      // Extract request body
+      // Extract request headers without disturbing the resource's body.
+      const sourceHeaders = (config && config.headers) || (isResourceRequest ? resource.headers : null);
+
+      // Extract request body.
+      // NOTE: a Request object's .body is ALWAYS a ReadableStream whenever a
+      // body is present, even if you passed a plain string, and reading a
+      // Request's own .headers/.body can disturb it. So for a plain
+      // resource+config call we read the raw value straight from `config`.
+      // If `resource` is itself a Request, we don't attempt to read its body
+      // at all (that would risk consuming it before the real fetch runs) —
+      // we just note that it's a Request-carried body.
       let requestBody = null;
       let requestBodyRaw = '';
-      const contentType = request.headers?.get?.('content-type') || '';
-      
-      if (request.body && method !== 'GET' && method !== 'HEAD') {
-        if (request.body instanceof ReadableStream) {
-          // Can't clone if already consumed, so just note it
-          requestBodyRaw = '[ReadableStream body]';
-        } else {
-          try {
-            requestBodyRaw = typeof request.body === 'string' ? request.body : String(request.body);
-            requestBody = parseBody(requestBodyRaw, contentType, API_FILTER_CONFIG.maxRequestBodySize);
-          } catch (e) {
-            requestBodyRaw = '[Error reading body]';
+      const contentType = (sourceHeaders && extractHeaders(sourceHeaders)['content-type'])
+        || (sourceHeaders && extractHeaders(sourceHeaders)['Content-Type'])
+        || '';
+      const rawConfigBody = config && config.body != null ? config.body : null;
+
+      if (isResourceRequest && resource.body != null) {
+        requestBodyRaw = '[Request-carried body - not read to avoid consuming it]';
+      }
+
+      if (rawConfigBody != null && method !== 'GET' && method !== 'HEAD') {
+        try {
+          if (typeof rawConfigBody === 'string') {
+            requestBodyRaw = rawConfigBody;
+          } else if (rawConfigBody instanceof URLSearchParams) {
+            requestBodyRaw = rawConfigBody.toString();
+          } else if (rawConfigBody instanceof FormData) {
+            requestBodyRaw = '[FormData - not parsed]';
+          } else if (rawConfigBody instanceof Blob) {
+            requestBodyRaw = '[Blob body - not parsed]';
+          } else if (rawConfigBody instanceof ReadableStream) {
+            // Genuine stream body (e.g. resource was already a Request, or a
+            // ReadableStream was passed directly) - can't safely read it here
+            // without risking consuming it before the real fetch happens.
+            requestBodyRaw = '[ReadableStream body]';
+          } else {
+            requestBodyRaw = JSON.stringify(rawConfigBody);
           }
+          requestBody = parseBody(requestBodyRaw, contentType, API_FILTER_CONFIG.maxRequestBodySize);
+        } catch (e) {
+          requestBodyRaw = '[Error reading body]';
         }
       }
 
       // Extract request headers
-      const requestHeaders = {};
-      try {
-        for (const [key, val] of request.headers || []) {
-          requestHeaders[key] = val;
-        }
-      } catch (e) {
-        // Headers may be restricted
-      }
+      const requestHeaders = extractHeaders(sourceHeaders);
 
       const apiRequest = {
         requestId,
@@ -239,7 +267,7 @@
         method,
         url,
         domain,
-        endpoint: request.url.replace(/^https?:\/\/[^/]+/, ''),
+        endpoint: url.replace(/^https?:\/\/[^/]+/, ''),
         status: null,
         headers: maskSensitiveHeaders(requestHeaders),
         requestBody,
@@ -259,7 +287,6 @@
       };
 
       pendingRequests.set(requestId, apiRequest);
-      console.log("[INTERCEPTOR]", apiRequest);
       sendApiRequestToBackground(apiRequest);
 
       // Call original fetch

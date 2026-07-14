@@ -4,8 +4,199 @@ const STORAGE_KEYS = {
   STEPS: 'recordedSteps',
   API_REQUESTS: 'apiRequests',
   RECORDING: 'isRecording',
-  HISTORY: 'testCaseHistory'
+  HISTORY: 'testCaseHistory',
+  ATTACHED_TAB: 'attachedTabId'
 };
+
+// ---------- network capture config (chrome.debugger / CDP) ----------
+const DEBUGGER_VERSION = '1.3';
+const NETWORK_CAPTURE_CONFIG = {
+  excludeDomains: [
+    'google-analytics.com',
+    'googletagmanager.com',
+    'analytics.google.com',
+    'cdn-cgi.com',
+    'cdnjs.cloudflare.com',
+    'unpkg.com',
+    'fonts.googleapis.com',
+    'fonts.gstatic.com'
+  ],
+  // Only these CDP resource types are captured — keeps images/CSS/fonts/docs
+  // out of the API request list, matching the extension's original intent.
+  includeResourceTypes: ['XHR', 'Fetch'],
+  maxBodySize: 50000
+};
+
+const pendingNetworkRequests = new Map(); // CDP requestId -> partial apiRequest
+
+function extractDomain(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+function shouldCaptureDomain(domain) {
+  if (!domain) return false;
+  for (const excluded of NETWORK_CAPTURE_CONFIG.excludeDomains) {
+    if (domain.includes(excluded) || excluded.includes(domain)) return false;
+  }
+  return true;
+}
+
+function parseBody(bodyStr, contentType, maxSize) {
+  if (!bodyStr) return null;
+  if (bodyStr.length > maxSize) return `[Body truncated - exceeds ${maxSize} bytes]`;
+  if (!contentType) return bodyStr;
+  try {
+    if (contentType.includes('application/json')) return JSON.parse(bodyStr);
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      const params = new URLSearchParams(bodyStr);
+      const obj = {};
+      for (const [key, val] of params) obj[key] = val;
+      return obj;
+    }
+    if (contentType.includes('multipart/form-data')) return '[FormData - not parsed]';
+  } catch {
+    return bodyStr;
+  }
+  return bodyStr;
+}
+
+function maskSensitiveHeaders(headers) {
+  const masked = { ...headers };
+  const sensitiveKeys = ['authorization', 'cookie', 'x-api-key', 'x-auth-token', 'password', 'token'];
+  for (const key of sensitiveKeys) {
+    const lowerKey = Object.keys(masked).find((k) => k.toLowerCase() === key);
+    if (lowerKey) {
+      const val = masked[lowerKey];
+      masked[lowerKey] = typeof val === 'string' ? val.slice(0, 3) + '***' : '***';
+    }
+  }
+  return masked;
+}
+
+async function attachDebugger(tabId) {
+  try {
+    await chrome.debugger.attach({ tabId }, DEBUGGER_VERSION);
+    await chrome.debugger.sendCommand({ tabId }, 'Network.enable');
+    await setStorage({ [STORAGE_KEYS.ATTACHED_TAB]: tabId });
+  } catch (e) {
+    console.warn('[Test Recorder] attachDebugger failed', e);
+  }
+}
+
+async function detachDebugger() {
+  const { [STORAGE_KEYS.ATTACHED_TAB]: attachedTabId } = await getStorage([STORAGE_KEYS.ATTACHED_TAB]);
+  if (attachedTabId != null) {
+    try { await chrome.debugger.detach({ tabId: attachedTabId }); } catch { /* already detached */ }
+    await setStorage({ [STORAGE_KEYS.ATTACHED_TAB]: null });
+  }
+  pendingNetworkRequests.clear();
+}
+
+chrome.debugger.onDetach.addListener(async (source, reason) => {
+  console.log('[Test Recorder] debugger detached:', reason);
+  await setStorage({ [STORAGE_KEYS.ATTACHED_TAB]: null });
+  pendingNetworkRequests.clear();
+});
+
+chrome.debugger.onEvent.addListener(async (source, method, params) => {
+  const { [STORAGE_KEYS.RECORDING]: isRecording } = await getStorage([STORAGE_KEYS.RECORDING]);
+  const { [STORAGE_KEYS.ATTACHED_TAB]: attachedTabId } = await getStorage([STORAGE_KEYS.ATTACHED_TAB]);
+  if (!isRecording || source.tabId !== attachedTabId) return;
+
+  if (method === 'Network.requestWillBeSent') {
+    const { requestId, request, wallTime, type } = params;
+    if (!['XHR', 'Fetch'].includes(type)) return;
+
+    const domain = extractDomain(request.url);
+    if (!shouldCaptureDomain(domain)) return;
+
+    const contentType = request.headers?.['Content-Type'] || request.headers?.['content-type'] || '';
+    const requestBodyRaw = request.postData || '';
+    const requestBody = requestBodyRaw
+      ? parseBody(requestBodyRaw, contentType, NETWORK_CAPTURE_CONFIG.maxBodySize)
+      : null;
+
+    pendingNetworkRequests.set(requestId, {
+      requestId: `req_${requestId}`,
+      timestamp: new Date((wallTime || Date.now() / 1000) * 1000).toISOString(),
+      method: request.method,
+      url: request.url,
+      domain,
+      endpoint: request.url.replace(/^https?:\/\/[^/]+/, ''),
+      status: null,
+      headers: maskSensitiveHeaders(request.headers || {}),
+      requestBody,
+      requestBodyRaw,
+      requestContentType: contentType,
+      responseHeaders: {},
+      responseBody: null,
+      responseBodyRaw: '',
+      responseContentType: '',
+      pageUrl: '',
+      pageTitle: '',
+      duration: 0,
+      initiator: type === 'Fetch' ? 'fetch' : 'xhr',
+      size: 0,
+      fromCache: false,
+      relatedStep: null,
+      _startTime: Date.now(),
+      _cdpRequestId: requestId
+    });
+
+    // Attach current tab's URL/title for context (best-effort, non-blocking).
+    try {
+      const tab = await chrome.tabs.get(source.tabId);
+      const p = pendingNetworkRequests.get(requestId);
+      if (p) { p.pageUrl = tab.url || ''; p.pageTitle = tab.title || ''; }
+    } catch { /* tab may be gone */ }
+  } else if (method === 'Network.responseReceived') {
+    const p = pendingNetworkRequests.get(params.requestId);
+    if (!p) return;
+    p.status = params.response.status;
+    p.responseHeaders = params.response.headers || {};
+    p.responseContentType = params.response.headers?.['content-type'] || params.response.headers?.['Content-Type'] || '';
+  } else if (method === 'Network.loadingFinished') {
+    const p = pendingNetworkRequests.get(params.requestId);
+    if (!p) return;
+    p.duration = Math.max(0, Date.now() - p._startTime);
+
+    try {
+      const r = await chrome.debugger.sendCommand(
+        { tabId: source.tabId }, 'Network.getResponseBody', { requestId: params.requestId }
+      );
+      if (r) {
+        p.size = r.body ? r.body.length : 0;
+        if (r.base64Encoded) {
+          p.responseBodyRaw = '[binary]';
+          p.responseBody = '[binary]';
+        } else {
+          p.responseBodyRaw = r.body || '';
+          p.responseBody = parseBody(r.body, p.responseContentType, NETWORK_CAPTURE_CONFIG.maxBodySize);
+        }
+      }
+    } catch {
+      // Body may be unavailable (e.g. redirects, opaque responses) — not fatal.
+    }
+
+    delete p._startTime;
+    delete p._cdpRequestId;
+    await addApiRequest(p);
+    pendingNetworkRequests.delete(params.requestId);
+  } else if (method === 'Network.loadingFailed') {
+    const p = pendingNetworkRequests.get(params.requestId);
+    if (!p) return;
+    p.status = 0;
+    p.duration = Math.max(0, Date.now() - p._startTime);
+    delete p._startTime;
+    delete p._cdpRequestId;
+    await addApiRequest(p);
+    pendingNetworkRequests.delete(params.requestId);
+  }
+});
 
 function generateId() {
   return `tc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -121,6 +312,16 @@ async function addApiRequest(apiRequest) {
   const { [STORAGE_KEYS.RECORDING]: isRecording } = await getStorage([STORAGE_KEYS.RECORDING]);
   if (!isRecording) return { ok: false, reason: 'not_recording' };
 
+  if (apiRequest.relatedStep == null) {
+    const steps = await getSteps();
+    const t = new Date(apiRequest.timestamp).getTime();
+    let related = null;
+    for (let i = steps.length - 1; i >= 0; i--) {
+      if (new Date(steps[i].timestamp).getTime() <= t) { related = steps[i].stepNumber; break; }
+    }
+    apiRequest.relatedStep = related;
+  }
+
   const requests = await getApiRequests();
   requests.push(apiRequest);
   await saveApiRequests(requests);
@@ -193,11 +394,21 @@ function renumberSteps(steps) {
 }
 
 async function startRecording(senderTabId) {
+  let targetTabId = senderTabId;
+  if (!targetTabId) {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    targetTabId = activeTab?.id;
+  }
+
   await setStorage({
     [STORAGE_KEYS.RECORDING]: true,
     [STORAGE_KEYS.STEPS]: [],
     [STORAGE_KEYS.API_REQUESTS]: []
   });
+
+  if (targetTabId) {
+    await attachDebugger(targetTabId);
+  }
 
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
@@ -223,6 +434,7 @@ async function startRecording(senderTabId) {
 }
 
 async function stopRecording() {
+  await detachDebugger();
   await setStorage({ [STORAGE_KEYS.RECORDING]: false });
 
   const tabs = await chrome.tabs.query({});
@@ -477,16 +689,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
           break;
         }
-        case 'ADD_API_REQUEST': {
-          console.log('[BACKGROUND] API REQUEST', message.apiRequest);
-      
-          const result = await addApiRequest(message.apiRequest);
-      
-          console.log('[BACKGROUND] STORED', result);
-      
-          sendResponse(result);
-          break;
-      }
         default:
           sendResponse({ ok: false, error: 'unknown_message' });
       }
